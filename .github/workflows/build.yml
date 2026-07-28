@@ -18,32 +18,20 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Link Android SDK
-        run: |
-          echo "sdk.dir=/usr/local/lib/android/sdk" > local.properties
-          echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> $GITHUB_ENV
-
-      - name: Download Gradle 8.5
-        run: |
-          wget -q https://services.gradle.org/distributions/gradle-8.5-bin.zip
-          unzip -q gradle-8.5-bin.zip
-          echo "$PWD/gradle-8.5/bin" >> $GITHUB_PATH
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: 8.5
+          cache-disabled: true
 
       - name: Build Debug APK
         run: gradle assembleDebug --stacktrace --no-daemon
         env:
-          GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx4g -Dorg.gradle.daemon=false
+          GRADLE_OPTS: -Dorg.gradle.daemon=false
 
-      - name: Upload APK
-        if: success()
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: istithmarak-gateway-debug
           path: app/build/outputs/apk/debug/app-debug.apk
-
-      - name: Show Error Log
-        if: failure()
-        run: |
-          echo "=== Gradle Error ==="
-          find . -name "*.log" -exec cat {} \; 2>/dev/null || true
-          ls -la app/build/outputs/ 2>/dev/null || true
+          retention-days: 7
