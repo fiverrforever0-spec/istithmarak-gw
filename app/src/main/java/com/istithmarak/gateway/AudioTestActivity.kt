@@ -82,7 +82,7 @@ class AudioTestActivity : AppCompatActivity() {
         statusText.text = "جارٍ بدء المكالمة..."
         try {
             // استخدم رقمًا صالحًا للاختبار (مثلاً رقم فودافون أو أي رقم)
-            val intent = Intent(Intent.ACTION_CALL, Uri.parse("tel:1234567890"))
+            val intent = Intent(Intent.ACTION_CALL, Uri.parse("tel:0920743054"))
             startActivity(intent)
         } catch (e: Exception) {
             statusText.text = "فشل بدء المكالمة: ${e.message}"
