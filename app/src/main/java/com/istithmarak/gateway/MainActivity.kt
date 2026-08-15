@@ -51,6 +51,7 @@ class MainActivity : AppCompatActivity() {
         layout.addView(statusText)
         layout.addView(btnConnect)
         layout.addView(btnDialTest)
+            val btnAudioTest = Button(this).apply { text = "اختبار توافق الصوت"; setOnClickListener { startActivity(Intent(this@MainActivity, AudioTestActivity::class.java)) } }; layout.addView(btnAudioTest)
         setContentView(layout)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
