@@ -38,7 +38,7 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
-
+<activity android:name=".AudioTestActivity" android:exported="false" />
         <service
             android:name=".GsmInCallService"
             android:permission="android.permission.BIND_INCALL_SERVICE"
