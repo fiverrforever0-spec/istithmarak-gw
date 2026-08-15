@@ -1,40 +1,28 @@
 package com.istithmarak.gateway
 
 import android.Manifest
-import android.app.role.RoleManager
-import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.telecom.TelecomManager
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import org.eclipse.paho.client.mqttv3.*
+import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence
+import org.json.JSONObject
+import java.util.concurrent.atomic.AtomicBoolean
 
 class MainActivity : AppCompatActivity() {
 
-    private val requiredPermissions = arrayOf(
-        Manifest.permission.RECORD_AUDIO,
-        Manifest.permission.READ_PHONE_STATE,
-        Manifest.permission.CALL_PHONE,
-        Manifest.permission.ANSWER_PHONE_CALLS
-    )
-
-    private val permissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        val allGranted = permissions.entries.all { it.value }
-        if (allGranted) {
-            checkAndRequestDefaultDialer()
-        } else {
-            Toast.makeText(this, "الأذونات مطلوبة لتشغيل البوابة", Toast.LENGTH_LONG).show()
-        }
-    }
+    private lateinit var statusText: TextView
+    private var mqttClient: MqttClient? = null
+    private val isRunning = AtomicBoolean(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -44,81 +32,149 @@ class MainActivity : AppCompatActivity() {
             setPadding(50, 100, 50, 50)
         }
 
-        val title = TextView(this).apply {
-            text = "Istithmarak GSM Gateway"
-            textSize = 22f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-        }
-
-        val statusText = TextView(this).apply {
-            text = "النظام جاهز. يرجى منح الأذونات وتعيين التطبيق كبرنامج اتصال افتراضي."
+        statusText = TextView(this).apply {
+            text = "جاهز للاتصال"
             textSize = 16f
-            setPadding(0, 30, 0, 50)
+            setPadding(0, 30, 0, 30)
         }
 
-        val btnPermissions = Button(this).apply {
-            text = "منح الأذونات"
-            setOnClickListener { requestRuntimePermissions() }
+        val btnConnect = Button(this).apply {
+            text = "تشغيل MQTT والاتصال"
+            setOnClickListener { startMqttConnection() }
         }
 
-        val btnDefaultDialer = Button(this).apply {
-            text = "تعيين كبرنامج اتصال افتراضي"
-            setOnClickListener { requestDefaultDialer() }
+        val btnDialTest = Button(this).apply {
+            text = "اختبار أمر dial"
+            setOnClickListener { testDialFromServer() }
         }
 
-        val btnStartMqtt = Button(this).apply {
-            text = "تشغيل خدمة التحكم عن بعد"
-            setOnClickListener {
-                startService(Intent(this@MainActivity, MqttControlService::class.java))
-                Toast.makeText(this@MainActivity, "تم تشغيل خدمة MQTT", Toast.LENGTH_SHORT).show()
-            }
-        }
-
-        layout.addView(title)
         layout.addView(statusText)
-        layout.addView(btnPermissions)
-        layout.addView(btnDefaultDialer)
-        layout.addView(btnStartMqtt)
+        layout.addView(btnConnect)
+        layout.addView(btnDialTest)
         setContentView(layout)
 
-        if (!hasAllPermissions()) {
-            requestRuntimePermissions()
-        } else {
-            checkAndRequestDefaultDialer()
-        }
-    }
-
-    private fun hasAllPermissions(): Boolean {
-        return requiredPermissions.all {
-            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
-        }
-    }
-
-    private fun requestRuntimePermissions() {
-        permissionLauncher.launch(requiredPermissions)
-    }
-
-    private fun checkAndRequestDefaultDialer() {
-        val telecomManager = getSystemService(Context.TELECOM_SERVICE) as TelecomManager
-        if (packageName != telecomManager.defaultDialerPackage) {
-            requestDefaultDialer()
-        }
-    }
-
-    private fun requestDefaultDialer() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val roleManager = getSystemService(Context.ROLE_SERVICE) as RoleManager
-            if (roleManager.isRoleAvailable(RoleManager.ROLE_DIALER) &&
-                !roleManager.isRoleHeld(RoleManager.ROLE_DIALER)
-            ) {
-                val intent = roleManager.createRequestRoleIntent(RoleManager.ROLE_DIALER)
-                startActivityForResult(intent, 101)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val perms = arrayOf(
+                Manifest.permission.CALL_PHONE,
+                Manifest.permission.READ_PHONE_STATE
+            )
+            if (perms.any { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }) {
+                ActivityCompat.requestPermissions(this, perms, 100)
             }
-        } else {
-            val intent = Intent(TelecomManager.ACTION_CHANGE_DEFAULT_DIALER).apply {
-                putExtra(TelecomManager.EXTRA_CHANGE_DEFAULT_DIALER_PACKAGE_NAME, packageName)
-            }
-            startActivity(intent)
         }
+    }
+
+    private fun startMqttConnection() {
+        if (isRunning.get()) {
+            statusText.text = "الاتصال يعمل بالفعل"
+            return
+        }
+        statusText.text = "جارٍ الاتصال بـ 127.0.0.1:1883 ..."
+        isRunning.set(true)
+
+        Thread {
+            try {
+                val brokerUrl = "tcp://127.0.0.1:1883"
+                val clientId = "mobile_gateway_01"
+                val client = MqttClient(brokerUrl, clientId, MemoryPersistence())
+                val options = MqttConnectOptions().apply {
+                    isAutomaticReconnect = true
+                    isCleanSession = true
+                    connectionTimeout = 10
+                    keepAliveInterval = 20
+                }
+
+                client.setCallback(object : MqttCallbackExtended {
+                    override fun connectComplete(reconnect: Boolean, serverURI: String?) {
+                        runOnUiThread { statusText.text = "✅ متصل بالخادم: $serverURI" }
+                        try {
+                            client.subscribe("node/command/mobile_gateway_01", 1)
+                            runOnUiThread { statusText.append("\nتم الاشتراك في node/command/mobile_gateway_01") }
+                            sendResponse("status", "success", "Mobile gateway connected")
+                        } catch (e: Exception) {
+                            runOnUiThread { statusText.text = "❌ خطأ في الاشتراك: ${e.message}" }
+                        }
+                    }
+
+                    override fun connectionLost(cause: Throwable?) {
+                        runOnUiThread { statusText.text = "انقطع الاتصال: ${cause?.message}" }
+                        isRunning.set(false)
+                    }
+
+                    override fun messageArrived(topic: String?, message: MqttMessage?) {
+                        val payload = message?.payload?.let { String(it) } ?: ""
+                        runOnUiThread { statusText.text = "📩 استقبال أمر: $payload" }
+                        handleCommand(payload)
+                    }
+
+                    override fun deliveryComplete(token: IMqttDeliveryToken?) {}
+                })
+
+                client.connect(options)
+                mqttClient = client
+            } catch (e: Exception) {
+                runOnUiThread { statusText.text = "❌ فشل الاتصال: ${e.message}" }
+                isRunning.set(false)
+            }
+        }.start()
+    }
+
+    private fun handleCommand(payload: String) {
+        try {
+            val json = JSONObject(payload)
+            val command = json.optString("command", "")
+            if (command == "dial") {
+                val phone = json.optJSONObject("payload")?.optString("phone", "") ?: ""
+                if (phone.isNotEmpty()) {
+                    runOnUiThread { statusText.text = "📞 جارٍ الاتصال بالرقم: $phone" }
+                    placeCall(phone)
+                    sendResponse("dial", "success", "تم الاتصال بـ $phone")
+                } else {
+                    sendResponse("dial", "error", "رقم مفقود")
+                }
+            }
+        } catch (e: Exception) {
+            sendResponse("unknown", "error", e.message ?: "")
+        }
+    }
+
+    private fun placeCall(phone: String) {
+        try {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
+                val intent = Intent(Intent.ACTION_CALL, Uri.parse("tel:$phone"))
+                startActivity(intent)
+            } else {
+                statusText.text = "❌ صلاحية CALL_PHONE غير ممنوحة"
+                sendResponse("dial", "error", "صلاحية المكالمة غير ممنوحة")
+            }
+        } catch (e: Exception) {
+            sendResponse("dial", "error", e.message ?: "")
+        }
+    }
+
+    private fun sendResponse(command: String, status: String, message: String) {
+        try {
+            val json = JSONObject().apply {
+                put("command", command)
+                put("status", status)
+                put("message", message)
+                put("timestamp", System.currentTimeMillis())
+            }
+            mqttClient?.publish("node/response/mobile_gateway_01", json.toString().toByteArray(), 1, false)
+        } catch (_: Exception) {}
+    }
+
+    private fun testDialFromServer() {
+        sendResponse("dial", "test", "تم إرسال أمر تجريبي")
+        Toast.makeText(this, "أرسل أمر dial من الخادم وشاهد النتيجة", Toast.LENGTH_SHORT).show()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        isRunning.set(false)
+        try {
+            mqttClient?.disconnect()
+            mqttClient?.close()
+        } catch (_: Exception) {}
     }
 }
