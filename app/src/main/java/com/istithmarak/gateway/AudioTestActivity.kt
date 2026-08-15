@@ -12,6 +12,7 @@ import android.os.Bundle
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -34,22 +35,35 @@ class AudioTestActivity : AppCompatActivity() {
         }
 
         statusText = TextView(this).apply {
-            text = "اضغط لبدء اختبار التقاط صوت المكالمة"
+            text = "خطوات الاختبار:\n1. اضغط بدء مكالمة اختبار.\n2. عد إلى هذا التطبيق.\n3. اضغط بدء تسجيل VOICE_CALL."
             textSize = 16f
             setPadding(0, 30, 0, 30)
         }
 
-        val btnTest = Button(this).apply {
-            text = "بدء مكالمة واختبار VOICE_CALL"
-            setOnClickListener { startTest() }
+        val btnCall = Button(this).apply {
+            text = "بدء مكالمة اختبار"
+            setOnClickListener { startTestCall() }
+        }
+
+        val btnRecord = Button(this).apply {
+            text = "بدء تسجيل VOICE_CALL"
+            setOnClickListener { startVoiceCallRecording() }
+        }
+
+        val btnStopRecord = Button(this).apply {
+            text = "إيقاف التسجيل"
+            setOnClickListener { stopRecording() }
         }
 
         layout.addView(statusText)
-        layout.addView(btnTest)
+        layout.addView(btnCall)
+        layout.addView(btnRecord)
+        layout.addView(btnStopRecord)
         setContentView(layout)
     }
 
-    private fun startTest() {
+    private fun startTestCall() {
+        // طلب أذونات الاتصال والتسجيل إذا لزم
         val permissions = mutableListOf(
             Manifest.permission.RECORD_AUDIO,
             Manifest.permission.CALL_PHONE
@@ -67,35 +81,21 @@ class AudioTestActivity : AppCompatActivity() {
 
         statusText.text = "جارٍ بدء المكالمة..."
         try {
+            // استخدم رقمًا صالحًا للاختبار (مثلاً رقم فودافون أو أي رقم)
             val intent = Intent(Intent.ACTION_CALL, Uri.parse("tel:1234567890"))
             startActivity(intent)
         } catch (e: Exception) {
             statusText.text = "فشل بدء المكالمة: ${e.message}"
+        }
+    }
+
+    private fun startVoiceCallRecording() {
+        // تأكد من أن المكالمة جارية (لا نستطيع الجزم برمجياً، لكن المستخدم سيعرف)
+        if (isRecording) {
+            statusText.text = "التسجيل جارٍ بالفعل"
             return
         }
 
-        statusText.text = "المكالمة بدأت، سيبدأ التسجيل بعد 5 ثوانٍ..."
-        Thread {
-            try {
-                Thread.sleep(5000)
-                runOnUiThread {
-                    statusText.text = "بدأ التسجيل من VOICE_CALL لمدة 5 ثوانٍ..."
-                }
-                startRecording()
-                Thread.sleep(5000)
-                stopRecording()
-                runOnUiThread {
-                    statusText.text = "انتهى الاختبار. راجع السجل."
-                }
-            } catch (e: Exception) {
-                runOnUiThread {
-                    statusText.text = "خطأ أثناء الاختبار: ${e.message}"
-                }
-            }
-        }.start()
-    }
-
-    private fun startRecording() {
         val sampleRate = 8000
         val channelConfig = AudioFormat.CHANNEL_IN_MONO
         val audioFormat = AudioFormat.ENCODING_PCM_16BIT
@@ -111,11 +111,12 @@ class AudioTestActivity : AppCompatActivity() {
                 bufferSize
             )
             if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
-                runOnUiThread { statusText.text = "فشل تهيئة AudioRecord" }
+                statusText.text = "فشل تهيئة AudioRecord (الجهاز لا يدعم VOICE_CALL غالبًا)"
                 return
             }
             audioRecord?.startRecording()
             isRecording = true
+            statusText.text = "بدأ التسجيل من VOICE_CALL لمدة غير محددة..."
 
             val buffer = ByteArray(bufferSize)
             val pcmFile = File(externalCacheDir, "voice_call_test_${System.currentTimeMillis()}.pcm")
@@ -142,9 +143,7 @@ class AudioTestActivity : AppCompatActivity() {
             }
             recordingThread?.start()
         } catch (e: Exception) {
-            runOnUiThread {
-                statusText.text = "فشل بدء التسجيل: ${e.message}"
-            }
+            statusText.text = "فشل بدء التسجيل: ${e.message}"
             isRecording = false
         }
     }
@@ -159,5 +158,6 @@ class AudioTestActivity : AppCompatActivity() {
         }
         audioRecord = null
         recordingThread?.join(1000)
+        statusText.text = "تم إيقاف التسجيل"
     }
 }
