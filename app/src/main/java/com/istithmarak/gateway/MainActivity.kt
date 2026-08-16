@@ -65,25 +65,15 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener { testDialFromServer() }
         }
 
-        val btnAudioTest = Button(this).apply {
-            text = "اختبار توافق الصوت"
-            setOnClickListener {
-                startActivity(Intent(this@MainActivity, AudioTestActivity::class.java))
-            }
-        }
-
         layout.addView(statusText)
         layout.addView(btnConnect)
         layout.addView(btnSendSms)
         layout.addView(btnCallVoice)
         layout.addView(btnDialTest)
-        layout.addView(btnAudioTest)
         setContentView(layout)
 
-        // طلب أذونات المكالمات والرسائل
         requestInitialPermissions()
 
-        // تهيئة TextToSpeech
         tts = TextToSpeech(this) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 tts?.language = Locale.getDefault()
@@ -134,7 +124,6 @@ class MainActivity : AppCompatActivity() {
             startActivity(intent)
             statusText.text = "بدأ الاتصال بـ $phone. سيتم تشغيل الرسالة بعد 10 ثوانٍ..."
 
-            // بعد 10 ثوانٍ، شغّل الرسالة الصوتية
             Handler(Looper.getMainLooper()).postDelayed({
                 speakWelcomeMessage()
             }, 10000)
