@@ -1,15 +1,17 @@
 package com.istithmarak.gateway
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.AudioAttributes
+import android.media.AudioManager
+import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.speech.tts.TextToSpeech
 import android.telephony.SmsManager
 import android.widget.Button
 import android.widget.LinearLayout
@@ -21,7 +23,6 @@ import androidx.core.content.ContextCompat
 import org.eclipse.paho.client.mqttv3.*
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence
 import org.json.JSONObject
-import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 
 class MainActivity : AppCompatActivity() {
@@ -29,7 +30,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusText: TextView
     private var mqttClient: MqttClient? = null
     private val isRunning = AtomicBoolean(false)
-    private var tts: TextToSpeech? = null
+    private var mediaPlayer: MediaPlayer? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -60,6 +61,11 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener { startWelcomeCall() }
         }
 
+        val btnPlayAudio = Button(this).apply {
+            text = "تشغيل رسالة صوتية (مؤقت)"
+            setOnClickListener { playWelcomeAudio() }
+        }
+
         val btnDialTest = Button(this).apply {
             text = "اختبار أمر dial"
             setOnClickListener { testDialFromServer() }
@@ -69,16 +75,11 @@ class MainActivity : AppCompatActivity() {
         layout.addView(btnConnect)
         layout.addView(btnSendSms)
         layout.addView(btnCallVoice)
+        layout.addView(btnPlayAudio)
         layout.addView(btnDialTest)
         setContentView(layout)
 
         requestInitialPermissions()
-
-        tts = TextToSpeech(this) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                tts?.language = Locale.getDefault()
-            }
-        }
     }
 
     private fun requestInitialPermissions() {
@@ -122,26 +123,41 @@ class MainActivity : AppCompatActivity() {
         try {
             val intent = Intent(Intent.ACTION_CALL, Uri.parse("tel:$phone"))
             startActivity(intent)
-            statusText.text = "بدأ الاتصال بـ $phone. سيتم تشغيل الرسالة بعد 10 ثوانٍ..."
-
-            Handler(Looper.getMainLooper()).postDelayed({
-                speakWelcomeMessage()
-            }, 10000)
+            statusText.text = "بدأ الاتصال بـ $phone. اضغط زر تشغيل الرسالة بعد أن يرد الطرف."
         } catch (e: Exception) {
             statusText.text = "فشل بدء المكالمة: ${e.message}"
         }
     }
 
-    private fun speakWelcomeMessage() {
-        val message = "للتواصل مع استثمارك أرسل على واتساب 0962411479"
+    private fun playWelcomeAudio() {
         try {
+            // ضبط وضع الصوت للاتصال
+            val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+            audioManager.isSpeakerphoneOn = true
+
             val audioAttributes = AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                 .build()
-            tts?.setAudioAttributes(audioAttributes)
-            tts?.speak(message, TextToSpeech.QUEUE_FLUSH, null, "welcome_msg")
-            statusText.text = "تم تشغيل الرسالة الصوتية"
+
+            mediaPlayer?.release()
+            mediaPlayer = MediaPlayer.create(this, R.raw.welcome_message).apply {
+                setAudioAttributes(audioAttributes)
+                setOnCompletionListener {
+                    statusText.text = "انتهى تشغيل الرسالة الصوتية"
+                    it.release()
+                    mediaPlayer = null
+                }
+                setOnErrorListener { _, what, extra ->
+                    statusText.text = "خطأ في تشغيل الصوت: what=$what extra=$extra"
+                    it.release()
+                    mediaPlayer = null
+                    true
+                }
+            }
+            mediaPlayer?.start()
+            statusText.text = "تم بدء تشغيل الرسالة الصوتية"
         } catch (e: Exception) {
             statusText.text = "فشل تشغيل الصوت: ${e.message}"
         }
@@ -263,7 +279,7 @@ class MainActivity : AppCompatActivity() {
             mqttClient?.disconnect()
             mqttClient?.close()
         } catch (_: Exception) {}
-        tts?.stop()
-        tts?.shutdown()
+        mediaPlayer?.release()
+        mediaPlayer = null
     }
 }
