@@ -10,8 +10,6 @@ import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.telephony.SmsManager
 import android.widget.Button
 import android.widget.LinearLayout
@@ -131,7 +129,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun playWelcomeAudio() {
         try {
-            // ضبط وضع الصوت للاتصال
             val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
             audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
             audioManager.isSpeakerphoneOn = true
@@ -144,14 +141,14 @@ class MainActivity : AppCompatActivity() {
             mediaPlayer?.release()
             mediaPlayer = MediaPlayer.create(this, R.raw.welcome_message).apply {
                 setAudioAttributes(audioAttributes)
-                setOnCompletionListener {
+                setOnCompletionListener { mp ->
                     statusText.text = "انتهى تشغيل الرسالة الصوتية"
-                    it.release()
+                    mp.release()
                     mediaPlayer = null
                 }
-                setOnErrorListener { _, what, extra ->
+                setOnErrorListener { mp, what, extra ->
                     statusText.text = "خطأ في تشغيل الصوت: what=$what extra=$extra"
-                    it.release()
+                    mp.release()
                     mediaPlayer = null
                     true
                 }
