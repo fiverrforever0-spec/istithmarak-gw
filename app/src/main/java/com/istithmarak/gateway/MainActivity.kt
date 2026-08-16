@@ -3,9 +3,14 @@ package com.istithmarak.gateway
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.AudioAttributes
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.speech.tts.TextToSpeech
+import android.telephony.SmsManager
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -16,6 +21,7 @@ import androidx.core.content.ContextCompat
 import org.eclipse.paho.client.mqttv3.*
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence
 import org.json.JSONObject
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 
 class MainActivity : AppCompatActivity() {
@@ -23,6 +29,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusText: TextView
     private var mqttClient: MqttClient? = null
     private val isRunning = AtomicBoolean(false)
+    private var tts: TextToSpeech? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -43,24 +50,111 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener { startMqttConnection() }
         }
 
+        val btnSendSms = Button(this).apply {
+            text = "إرسال SMS ترحيبي"
+            setOnClickListener { sendWelcomeSms() }
+        }
+
+        val btnCallVoice = Button(this).apply {
+            text = "اتصال صوتي ترحيبي"
+            setOnClickListener { startWelcomeCall() }
+        }
+
         val btnDialTest = Button(this).apply {
             text = "اختبار أمر dial"
             setOnClickListener { testDialFromServer() }
         }
 
+        val btnAudioTest = Button(this).apply {
+            text = "اختبار توافق الصوت"
+            setOnClickListener {
+                startActivity(Intent(this@MainActivity, AudioTestActivity::class.java))
+            }
+        }
+
         layout.addView(statusText)
         layout.addView(btnConnect)
+        layout.addView(btnSendSms)
+        layout.addView(btnCallVoice)
         layout.addView(btnDialTest)
+        layout.addView(btnAudioTest)
         setContentView(layout)
 
+        // طلب أذونات المكالمات والرسائل
+        requestInitialPermissions()
+
+        // تهيئة TextToSpeech
+        tts = TextToSpeech(this) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                tts?.language = Locale.getDefault()
+            }
+        }
+    }
+
+    private fun requestInitialPermissions() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             val perms = arrayOf(
                 Manifest.permission.CALL_PHONE,
-                Manifest.permission.READ_PHONE_STATE
+                Manifest.permission.READ_PHONE_STATE,
+                Manifest.permission.SEND_SMS
             )
-            if (perms.any { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }) {
-                ActivityCompat.requestPermissions(this, perms, 100)
+            val missing = perms.filter {
+                ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
             }
+            if (missing.isNotEmpty()) {
+                ActivityCompat.requestPermissions(this, missing.toTypedArray(), 100)
+            }
+        }
+    }
+
+    private fun sendWelcomeSms() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED) {
+            Toast.makeText(this, "صلاحية إرسال الرسائل غير ممنوحة", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val phone = "0920743054"
+        val message = "مرحب بيك في استثمارك للحلول الاستثمارية الذكية"
+        try {
+            val smsManager = SmsManager.getDefault()
+            smsManager.sendTextMessage(phone, null, message, null, null)
+            statusText.text = "تم إرسال SMS إلى $phone"
+        } catch (e: Exception) {
+            statusText.text = "فشل إرسال SMS: ${e.message}"
+        }
+    }
+
+    private fun startWelcomeCall() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED) {
+            Toast.makeText(this, "صلاحية الاتصال غير ممنوحة", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val phone = "0920743054"
+        try {
+            val intent = Intent(Intent.ACTION_CALL, Uri.parse("tel:$phone"))
+            startActivity(intent)
+            statusText.text = "بدأ الاتصال بـ $phone. سيتم تشغيل الرسالة بعد 10 ثوانٍ..."
+
+            // بعد 10 ثوانٍ، شغّل الرسالة الصوتية
+            Handler(Looper.getMainLooper()).postDelayed({
+                speakWelcomeMessage()
+            }, 10000)
+        } catch (e: Exception) {
+            statusText.text = "فشل بدء المكالمة: ${e.message}"
+        }
+    }
+
+    private fun speakWelcomeMessage() {
+        val message = "للتواصل مع استثمارك أرسل على واتساب 0962411479"
+        try {
+            val audioAttributes = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build()
+            tts?.setAudioAttributes(audioAttributes)
+            tts?.speak(message, TextToSpeech.QUEUE_FLUSH, null, "welcome_msg")
+            statusText.text = "تم تشغيل الرسالة الصوتية"
+        } catch (e: Exception) {
+            statusText.text = "فشل تشغيل الصوت: ${e.message}"
         }
     }
 
@@ -126,9 +220,16 @@ class MainActivity : AppCompatActivity() {
             if (command == "dial") {
                 val phone = json.optJSONObject("payload")?.optString("phone", "") ?: ""
                 if (phone.isNotEmpty()) {
-                    runOnUiThread { statusText.text = "📞 جارٍ الاتصال بالرقم: $phone" }
-                    placeCall(phone)
-                    sendResponse("dial", "success", "تم الاتصال بـ $phone")
+                    runOnUiThread {
+                        statusText.text = "📞 جارٍ الاتصال بالرقم: $phone"
+                        try {
+                            placeCall(phone)
+                            sendResponse("dial", "success", "تم الاتصال بـ $phone")
+                        } catch (e: Exception) {
+                            statusText.text = "❌ خطأ في الاتصال: ${e.message}"
+                            sendResponse("dial", "error", e.message ?: "")
+                        }
+                    }
                 } else {
                     sendResponse("dial", "error", "رقم مفقود")
                 }
@@ -139,17 +240,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun placeCall(phone: String) {
-        try {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
-                val intent = Intent(Intent.ACTION_CALL, Uri.parse("tel:$phone"))
-                startActivity(intent)
-            } else {
-                statusText.text = "❌ صلاحية CALL_PHONE غير ممنوحة"
-                sendResponse("dial", "error", "صلاحية المكالمة غير ممنوحة")
-            }
-        } catch (e: Exception) {
-            sendResponse("dial", "error", e.message ?: "")
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CALL_PHONE), 100)
+            statusText.text = "منح إذن المكالمات مطلوب"
+            throw SecurityException("CALL_PHONE permission not granted")
         }
+        val intent = Intent(Intent.ACTION_CALL, Uri.parse("tel:$phone"))
+        intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        startActivity(intent)
     }
 
     private fun sendResponse(command: String, status: String, message: String) {
@@ -176,5 +274,7 @@ class MainActivity : AppCompatActivity() {
             mqttClient?.disconnect()
             mqttClient?.close()
         } catch (_: Exception) {}
+        tts?.stop()
+        tts?.shutdown()
     }
 }
