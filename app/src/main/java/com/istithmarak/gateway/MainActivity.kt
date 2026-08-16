@@ -130,11 +130,17 @@ class MainActivity : AppCompatActivity() {
     private fun playWelcomeAudio() {
         try {
             val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            // تفعيل مكبر الصوت ورفع مستوى الصوت
             audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
             audioManager.isSpeakerphoneOn = true
+            audioManager.setStreamVolume(
+                AudioManager.STREAM_MUSIC,
+                audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC),
+                0
+            )
 
             val audioAttributes = AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                .setUsage(AudioAttributes.USAGE_MEDIA)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                 .build()
 
@@ -154,7 +160,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             mediaPlayer?.start()
-            statusText.text = "تم بدء تشغيل الرسالة الصوتية"
+            statusText.text = "تم بدء تشغيل الرسالة عبر مكبر الصوت"
         } catch (e: Exception) {
             statusText.text = "فشل تشغيل الصوت: ${e.message}"
         }
